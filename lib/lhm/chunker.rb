@@ -27,16 +27,17 @@ module Lhm
     def execute
       return unless @start && @limit
       @next_to_insert = @start
+      @connection.update(copy_equal(bottom))
       while @next_to_insert < @limit || (@next_to_insert == 1 && @start == 1)
         stride = @throttler.stride
-        affected_rows = @connection.update(copy(bottom, top(stride)))
+        affected_rows = @connection.update(copy(bottom, stride))
 
         if @throttler && affected_rows > 0
           @throttler.run
         end
 
         @printer.notify(bottom, @limit)
-        @next_to_insert = top(stride) + 1
+        @next_to_insert = next_to_insert
       end
       @printer.end
     end
@@ -47,14 +48,21 @@ module Lhm
       @next_to_insert
     end
 
-    def top(stride)
-      [(@next_to_insert + stride - 1), @limit].min
+    def next_to_insert
+      connection.select_value("select max(id) from #{ destination_name } where id <= #{ @limit }")
     end
 
-    def copy(lowest, highest)
+    def copy(lowest, stride)
+      "#{ copy_prefix } #{ conditions } `#{ origin_name }`.`id` > #{ lowest } limit #{ stride }"
+    end
+
+    def copy_equal(id)
+      "#{ copy_prefix } #{ conditions } `#{ origin_name }`.`id` = #{ id }"
+    end
+
+    def copy_prefix
       "insert ignore into `#{ destination_name }` (#{ destination_columns }) " \
-      "select #{ origin_columns } from `#{ origin_name }` " \
-      "#{ conditions } `#{ origin_name }`.`id` between #{ lowest } and #{ highest }"
+      "select #{ origin_columns } from `#{ origin_name }`"
     end
 
     def select_start
